@@ -43,6 +43,12 @@ int main(int argc, char** argv) {
     matrix[5][5]   = 5.0f;
     matrix[20][20] = 3.0f;
 
+    // Imposto variabili per convergenza
+    double sum_old = 0.0;
+    double sum_new = 0.0;
+    double epsilon = 0.01;
+    bool flag = 0;
+
     // Configuro OpenMP
     omp_set_dynamic(0);
     omp_set_num_threads(6);
@@ -66,6 +72,7 @@ int main(int argc, char** argv) {
         int end_i   = start_i + count;             // non incluso
 
         for (int step = 0; step < STEPS; ++step) {
+            double local_sum_new = 0;  // Variabile locale per la somma del thread corrente
             // 1) calcolo next_matrix sulla mia fetta
             for (int i = start_i; i < end_i; ++i) {
                 for (int j = 1; j < N-1; ++j) {
@@ -77,8 +84,13 @@ int main(int argc, char** argv) {
                             matrix[i][j-1] -
                             4.0f * matrix[i][j]
                           );
+                local_sum_new += next_matrix[i][j];
                 }
             }
+
+            // Accumulo la somma di tutti i thread
+            #pragma omp atomic
+            sum_new += local_sum_new;
 
             // 2) sincronizzo tutti i thread
             #pragma omp barrier
@@ -86,6 +98,14 @@ int main(int argc, char** argv) {
             // 3) un solo thread resetta le sorgenti e fa lo swap
             #pragma omp single
             {
+                if (abs(sum_new-sum_old) < epsilon)
+                {
+                    cout<< "Raggiunta convergenza: " << epsilon << endl;
+                    flag = true;
+                }
+
+                sum_old = sum_new;
+                
                 next_matrix[5][5]   = 5.0f;
                 next_matrix[20][20] = 3.0f;
                 // swap dei puntatori per il ping‑pong
@@ -94,8 +114,15 @@ int main(int argc, char** argv) {
                 double now = omp_get_wtime();
                 times.push_back(now - last_time);
                 last_time = now;
+
+                // Resetto la variabile per il prossimo step
+                sum_new = 0;
             } 
-            // barriera implicita alla chiusura della parentesi
+            if (flag)
+            {
+               break;
+            }
+            
 
         }
     } // fine parallel
